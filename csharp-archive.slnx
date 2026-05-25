@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/ms-learn/">
+    <Project Path="ms-learn/01_hello_world/01_hello_world.csproj" />
+  </Folder>
+  <Folder Name="/programmers/">
+    <Project Path="programmers/test1/test1.csproj" />
+  </Folder>
+</Solution>
