@@ -1,21 +1,124 @@
-bin/
-obj/
-.vs/
-*.user
+# User-specific files
+*.rsuser
 *.suo
+*.user
 *.userosscache
 *.sln.docstates
 
-# Build results
-[Dd]ebug/
-[Rr]elease/
-x64/
-x86/
-[Aa][Rr][Mm]/
-[Aa][Rr][Mm]64/
+# User-specific files for Rider
+*.sln.iml
+*.DotSettings.user
 
-# Rider
+# Visual Studio cache/options
+.vs/
+.vscode/
 .idea/
 
-# Visual Studio Code
-.vscode/
+# Build results
+[Dd]ebug/
+[Dd]ebugPublic/
+[Rr]elease/
+[Rr]eleases/
+x64/
+x86/
+[Ww][Ii][Nn]32/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+bld/
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+
+# Visual Studio profiler
+*.psess
+*.vsp
+*.vspx
+*.sap
+
+# Test results
+[Tt]est[Rr]esult*/
+[Bb]uild[Ll]og.*
+*.VisualState.xml
+TestResult.xml
+nunit-*.xml
+
+# Coverage results
+*.coverage
+*.coveragexml
+coverage/
+coverage-reports/
+
+# NuGet
+*.nupkg
+*.snupkg
+**/[Pp]ackages/*
+!**/[Pp]ackages/build/
+*.nuget.props
+*.nuget.targets
+project.assets.json
+project.nuget.cache
+
+# ASP.NET / .NET generated files
+Generated_Code/
+_UpgradeReport_Files/
+UpgradeLog*.XML
+UpgradeLog*.htm
+ServiceFabricBackup/
+*.Publish.xml
+*.pubxml
+*.pubxml.user
+*.dbmdl
+*.jfm
+
+# Local configuration and secrets
+appsettings.*.local.json
+appsettings.Local.json
+secrets.json
+
+# SQL Server files
+*.mdf
+*.ldf
+
+# IIS Express
+.vs/config/applicationhost.config
+
+# ReSharper
+_ReSharper*/
+*.[Rr]e[Ss]harper
+
+# Roslyn cache
+*.ide
+*.ide-shm
+*.ide-wal
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+*.tlog
+*.cache
+*.ilk
+*.meta
+*.obj
+*.pch
+*.pdb
+*.ipch
+*.iobj
+*.ipdb
+*.pgc
+*.pgd
+*.rsp
+*.sbr
+*.tlb
+*.tlh
+*.bak
+*.orig
+*.rej
+~$*
+
+# OS files
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+.DS_Store
