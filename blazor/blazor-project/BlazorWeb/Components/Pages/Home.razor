@@ -1,0 +1,107 @@
+@page "/"
+
+@inject IDbContextFactory<ApplicationDbContext> DbContextFactory
+
+<PageTitle>Dev Study Archive</PageTitle>
+
+<section class="hero-section">
+    <div class="hero-copy">
+        <p class="eyebrow">Computer Science / Development / Study Log</p>
+        <h1>개발자가 공부한 내용을 체계적으로 정리한 기술 아카이브</h1>
+        <p class="hero-description">
+            CS 전공 지식, 프로그래밍 언어 학습, 프로젝트 개발 일지, 과제와 포트폴리오 문서를 한 곳에서 관리하는 개발자 블로그입니다.
+        </p>
+        <div class="hero-actions">
+            <a class="primary-action" href="category/cs">CS Notes</a>
+            <a class="secondary-action" href="https://github.com/UND147/BlazorWebV1" target="_blank" rel="noopener noreferrer">GitHub</a>
+        </div>
+    </div>
+
+    <div class="tech-stack-panel" aria-label="Technology stack">
+        <span>C#</span>
+        <span>Blazor</span>
+        <span>ASP.NET Core</span>
+        <span>MSSQL</span>
+        <span>EF Core</span>
+        <span>Identity</span>
+    </div>
+</section>
+
+<section class="section-block">
+    <div class="section-heading">
+        <p class="eyebrow">Latest Notes</p>
+        <h2>최신 글</h2>
+    </div>
+
+    @if (listLatestPosts.Count == 0)
+    {
+        <div class="empty-state">
+            아직 게시된 글이 없습니다. 관리자 계정으로 로그인해 첫 글을 작성하세요.
+        </div>
+    }
+    else
+    {
+        <div class="post-grid">
+            @for (int iIndex = 0; iIndex < listLatestPosts.Count; iIndex++)
+            {
+                BlogPost blogPost = listLatestPosts[iIndex];
+                <article class="post-card">
+                    <a href="@($"posts/{blogPost.Slug}")">
+                        <span class="post-category">@blogPost.BlogCategory?.Name</span>
+                        <h3>@blogPost.Title</h3>
+                        <p>@blogPost.Summary</p>
+                        <time datetime="@blogPost.PublishedAtUtc?.ToString("O")">@FormatDate(blogPost.PublishedAtUtc)</time>
+                    </a>
+                </article>
+            }
+        </div>
+    }
+</section>
+
+<section class="section-block">
+    <div class="section-heading">
+        <p class="eyebrow">Archive Map</p>
+        <h2>주요 카테고리</h2>
+    </div>
+
+    <div class="category-grid">
+        @for (int iIndex = 0; iIndex < listRootCategories.Count; iIndex++)
+        {
+            BlogCategory blogCategory = listRootCategories[iIndex];
+            <a class="category-card" href="@($"category/{blogCategory.Slug}")">
+                <span>@blogCategory.Name</span>
+                <p>@blogCategory.Description</p>
+            </a>
+        }
+    </div>
+</section>
+
+@code {
+    private List<BlogPost> listLatestPosts = [];
+    private List<BlogCategory> listRootCategories = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        await using ApplicationDbContext applicationDbContext = await DbContextFactory.CreateDbContextAsync();
+
+        listLatestPosts = await applicationDbContext.BlogPosts
+            .AsNoTracking()
+            .Include(blogPost => blogPost.BlogCategory)
+            .Where(blogPost => blogPost.IsPublished)
+            .OrderByDescending(blogPost => blogPost.PublishedAtUtc)
+            .Take(6)
+            .ToListAsync();
+
+        listRootCategories = await applicationDbContext.BlogCategories
+            .AsNoTracking()
+            .Where(blogCategory => blogCategory.ParentBlogCategoryId == null)
+            .OrderBy(blogCategory => blogCategory.SortOrder)
+            .ThenBy(blogCategory => blogCategory.Name)
+            .ToListAsync();
+    }
+
+    private static string FormatDate(DateTime? dateTimePublishedAtUtc)
+    {
+        return dateTimePublishedAtUtc?.ToLocalTime().ToString("yyyy.MM.dd") ?? "Draft";
+    }
+}

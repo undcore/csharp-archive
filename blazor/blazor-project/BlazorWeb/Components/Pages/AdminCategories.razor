@@ -1,0 +1,291 @@
+@page "/admin/categories"
+@attribute [Authorize(Roles = BlogRoles.Admin)]
+
+@using System.ComponentModel.DataAnnotations
+
+@inject IDbContextFactory<ApplicationDbContext> DbContextFactory
+@inject SlugService SlugService
+
+<PageTitle>Category Admin</PageTitle>
+
+<section class="archive-header admin-header">
+    <div>
+        <p class="eyebrow">Admin</p>
+        <h1>카테고리 관리</h1>
+        <p>상단 메뉴와 게시글 작성 화면에서 사용하는 카테고리 구조를 관리합니다.</p>
+    </div>
+    <a class="secondary-action" href="admin/posts">Posts</a>
+</section>
+
+<div class="category-admin-layout">
+    <EditForm Model="inputModel" OnValidSubmit="SaveCategoryAsync" FormName="category-editor" class="editor-side category-editor">
+        <DataAnnotationsValidator />
+        <ValidationSummary class="text-danger" role="alert" />
+
+        @if (!string.IsNullOrWhiteSpace(sStatusMessage))
+        {
+            <div class="status-message">@sStatusMessage</div>
+        }
+
+        <label class="field-group">
+            <span>Name</span>
+            <InputText @bind-Value="inputModel.Name" class="form-control" />
+            <ValidationMessage For="() => inputModel.Name" class="text-danger" />
+        </label>
+
+        <label class="field-group">
+            <span>Slug</span>
+            <InputText @bind-Value="inputModel.Slug" class="form-control" />
+        </label>
+
+        <label class="field-group">
+            <span>Description</span>
+            <InputTextArea @bind-Value="inputModel.Description" class="form-control summary-input" />
+        </label>
+
+        <label class="field-group">
+            <span>Parent</span>
+            <InputSelect @bind-Value="inputModel.ParentBlogCategoryId" class="form-control">
+                <option value="">Root category</option>
+                @for (int iIndex = 0; iIndex < listCategories.Count; iIndex++)
+                {
+                    BlogCategory blogCategory = listCategories[iIndex];
+
+                    if (blogCategory.BlogCategoryId != inputModel.BlogCategoryId)
+                    {
+                        <option value="@blogCategory.BlogCategoryId">@GetCategoryLabel(blogCategory)</option>
+                    }
+                }
+            </InputSelect>
+        </label>
+
+        <label class="field-group">
+            <span>Sort Order</span>
+            <InputNumber @bind-Value="inputModel.SortOrder" class="form-control" />
+        </label>
+
+        <button type="submit" class="primary-action editor-submit">@GetSubmitText()</button>
+        <button type="button" class="secondary-action editor-cancel" @onclick="ResetInput">Clear</button>
+    </EditForm>
+
+    <section class="admin-table-shell">
+        <table class="admin-table">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Slug</th>
+                    <th>Parent</th>
+                    <th>Order</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                @for (int iIndex = 0; iIndex < listCategories.Count; iIndex++)
+                {
+                    BlogCategory blogCategory = listCategories[iIndex];
+                    <tr>
+                        <td>
+                            <strong>@blogCategory.Name</strong>
+                            <span>@blogCategory.Description</span>
+                        </td>
+                        <td>@blogCategory.Slug</td>
+                        <td>@(blogCategory.ParentBlogCategory?.Name ?? "Root")</td>
+                        <td>@blogCategory.SortOrder</td>
+                        <td class="table-actions">
+                            <button type="button" class="table-button" @onclick="() => EditCategory(blogCategory.BlogCategoryId)">Edit</button>
+                            <button type="button" class="table-button danger-button" @onclick="() => DeleteCategoryAsync(blogCategory.BlogCategoryId)">Delete</button>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </section>
+</div>
+
+@code {
+    private CategoryInputModel inputModel = new();
+    private List<BlogCategory> listCategories = [];
+    private string? sStatusMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadCategoriesAsync();
+    }
+
+    private async Task LoadCategoriesAsync()
+    {
+        await using ApplicationDbContext applicationDbContext = await DbContextFactory.CreateDbContextAsync();
+
+        listCategories = await applicationDbContext.BlogCategories
+            .AsNoTracking()
+            .Include(blogCategory => blogCategory.ParentBlogCategory)
+            .OrderBy(blogCategory => blogCategory.ParentBlogCategory == null ? blogCategory.SortOrder : blogCategory.ParentBlogCategory.SortOrder)
+            .ThenBy(blogCategory => blogCategory.ParentBlogCategoryId == null ? "" : blogCategory.ParentBlogCategory!.Name)
+            .ThenBy(blogCategory => blogCategory.SortOrder)
+            .ThenBy(blogCategory => blogCategory.Name)
+            .ToListAsync();
+    }
+
+    private void EditCategory(int iBlogCategoryId)
+    {
+        BlogCategory? blogCategory = listCategories.FirstOrDefault(blogCategoryItem => blogCategoryItem.BlogCategoryId == iBlogCategoryId);
+
+        if (blogCategory is null)
+        {
+            return;
+        }
+
+        inputModel = new CategoryInputModel
+        {
+            BlogCategoryId = blogCategory.BlogCategoryId,
+            Name = blogCategory.Name,
+            Slug = blogCategory.Slug,
+            Description = blogCategory.Description,
+            ParentBlogCategoryId = blogCategory.ParentBlogCategoryId,
+            SortOrder = blogCategory.SortOrder
+        };
+
+        sStatusMessage = null;
+    }
+
+    private async Task SaveCategoryAsync()
+    {
+        if (inputModel.ParentBlogCategoryId == inputModel.BlogCategoryId)
+        {
+            sStatusMessage = "자기 자신을 상위 카테고리로 지정할 수 없습니다.";
+            return;
+        }
+
+        await using ApplicationDbContext applicationDbContext = await DbContextFactory.CreateDbContextAsync();
+        BlogCategory blogCategory;
+
+        if (inputModel.BlogCategoryId > 0)
+        {
+            BlogCategory? blogCategoryExisting = await applicationDbContext.BlogCategories
+                .FirstOrDefaultAsync(blogCategoryItem => blogCategoryItem.BlogCategoryId == inputModel.BlogCategoryId);
+
+            if (blogCategoryExisting is null)
+            {
+                sStatusMessage = "수정할 카테고리를 찾을 수 없습니다.";
+                return;
+            }
+
+            blogCategory = blogCategoryExisting;
+        }
+        else
+        {
+            blogCategory = new BlogCategory();
+            applicationDbContext.BlogCategories.Add(blogCategory);
+        }
+
+        string sBaseSlug = string.IsNullOrWhiteSpace(inputModel.Slug)
+            ? SlugService.CreateSlug(inputModel.Name)
+            : SlugService.CreateSlug(inputModel.Slug);
+
+        blogCategory.Name = inputModel.Name.Trim();
+        blogCategory.Slug = await CreateUniqueCategorySlugAsync(applicationDbContext, sBaseSlug, blogCategory.BlogCategoryId);
+        blogCategory.Description = inputModel.Description.Trim();
+        blogCategory.ParentBlogCategoryId = inputModel.ParentBlogCategoryId;
+        blogCategory.SortOrder = inputModel.SortOrder;
+
+        await applicationDbContext.SaveChangesAsync();
+        ResetInput();
+        await LoadCategoriesAsync();
+        sStatusMessage = "카테고리가 저장되었습니다.";
+    }
+
+    private async Task DeleteCategoryAsync(int iBlogCategoryId)
+    {
+        await using ApplicationDbContext applicationDbContext = await DbContextFactory.CreateDbContextAsync();
+        BlogCategory? blogCategory = await applicationDbContext.BlogCategories
+            .FirstOrDefaultAsync(blogCategoryItem => blogCategoryItem.BlogCategoryId == iBlogCategoryId);
+
+        if (blogCategory is null)
+        {
+            return;
+        }
+
+        bool bHasChildren = await applicationDbContext.BlogCategories
+            .AnyAsync(blogCategoryItem => blogCategoryItem.ParentBlogCategoryId == iBlogCategoryId);
+        bool bHasPosts = await applicationDbContext.BlogPosts
+            .AnyAsync(blogPost => blogPost.BlogCategoryId == iBlogCategoryId);
+
+        if (bHasChildren || bHasPosts)
+        {
+            sStatusMessage = "하위 카테고리나 게시글이 있는 카테고리는 삭제할 수 없습니다.";
+            return;
+        }
+
+        applicationDbContext.BlogCategories.Remove(blogCategory);
+        await applicationDbContext.SaveChangesAsync();
+        ResetInput();
+        await LoadCategoriesAsync();
+        sStatusMessage = "카테고리가 삭제되었습니다.";
+    }
+
+    private async Task<string> CreateUniqueCategorySlugAsync(ApplicationDbContext applicationDbContext, string sBaseSlug, int iCurrentCategoryId)
+    {
+        bool bBaseSlugExists = await applicationDbContext.BlogCategories
+            .AnyAsync(blogCategory => blogCategory.Slug == sBaseSlug && blogCategory.BlogCategoryId != iCurrentCategoryId);
+
+        if (!bBaseSlugExists)
+        {
+            return sBaseSlug;
+        }
+
+        for (int iIndex = 2; iIndex < 10000; iIndex++)
+        {
+            string sCandidateSlug = $"{sBaseSlug}-{iIndex}";
+            bool bCandidateExists = await applicationDbContext.BlogCategories
+                .AnyAsync(blogCategory => blogCategory.Slug == sCandidateSlug && blogCategory.BlogCategoryId != iCurrentCategoryId);
+
+            if (!bCandidateExists)
+            {
+                return sCandidateSlug;
+            }
+        }
+
+        string sFallbackSlug = $"{sBaseSlug}-{Guid.NewGuid():N}";
+        return sFallbackSlug.Length > 180 ? sFallbackSlug[..180] : sFallbackSlug;
+    }
+
+    private void ResetInput()
+    {
+        inputModel = new CategoryInputModel();
+        sStatusMessage = null;
+    }
+
+    private string GetSubmitText()
+    {
+        return inputModel.BlogCategoryId > 0 ? "Update Category" : "Create Category";
+    }
+
+    private static string GetCategoryLabel(BlogCategory blogCategory)
+    {
+        if (blogCategory.ParentBlogCategory is null)
+        {
+            return blogCategory.Name;
+        }
+
+        return $"{blogCategory.ParentBlogCategory.Name} / {blogCategory.Name}";
+    }
+
+    private sealed class CategoryInputModel
+    {
+        public int BlogCategoryId { get; set; }
+
+        [Required(ErrorMessage = "카테고리 이름을 입력하세요.")]
+        [StringLength(80)]
+        public string Name { get; set; } = "";
+
+        [StringLength(120)]
+        public string Slug { get; set; } = "";
+
+        [StringLength(240)]
+        public string Description { get; set; } = "";
+
+        public int? ParentBlogCategoryId { get; set; }
+
+        public int SortOrder { get; set; }
+    }
+}
