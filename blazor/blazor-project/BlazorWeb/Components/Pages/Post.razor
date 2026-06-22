@@ -1,0 +1,157 @@
+@page "/posts/{Slug}"
+
+@inject IDbContextFactory<ApplicationDbContext> DbContextFactory
+@inject MarkdownRenderService MarkdownRenderService
+
+<PageTitle>@(blogPostSelected?.Title ?? "Post")</PageTitle>
+
+@if (blogPostSelected is null)
+{
+    <section class="empty-state">
+        게시글을 찾을 수 없습니다.
+    </section>
+}
+else
+{
+    <article class="article-layout">
+        <header class="article-header">
+            <span class="post-category">@blogPostSelected.BlogCategory?.Name</span>
+            <h1>@blogPostSelected.Title</h1>
+            <p>@blogPostSelected.Summary</p>
+            <div class="article-meta">
+                <span>@blogPostSelected.Author?.Nickname</span>
+                <time datetime="@blogPostSelected.PublishedAtUtc?.ToString("O")">@FormatDate(blogPostSelected.PublishedAtUtc)</time>
+                <span>@blogPostSelected.ViewCount views</span>
+            </div>
+            <div class="tag-row">
+                @for (int iIndex = 0; iIndex < listTagNames.Count; iIndex++)
+                {
+                    <span>@listTagNames[iIndex]</span>
+                }
+            </div>
+        </header>
+
+        <div class="article-body-grid">
+            <div class="article-content">
+                @((MarkupString)renderedArticle.HtmlContent)
+            </div>
+
+            <aside class="toc-panel">
+                <p>TOC</p>
+                @if (renderedArticle.TableOfContentsItems.Count == 0)
+                {
+                    <span class="toc-empty">목차 없음</span>
+                }
+                else
+                {
+                    <nav>
+                        @for (int iIndex = 0; iIndex < renderedArticle.TableOfContentsItems.Count; iIndex++)
+                        {
+                            TableOfContentsItem tableOfContentsItem = renderedArticle.TableOfContentsItems[iIndex];
+                            <a class="@($"toc-level-{tableOfContentsItem.Level}")" href="@($"#{tableOfContentsItem.Anchor}")">@tableOfContentsItem.Text</a>
+                        }
+                    </nav>
+                }
+            </aside>
+        </div>
+    </article>
+
+    @if (listRelatedPosts.Count > 0)
+    {
+        <section class="section-block">
+            <div class="section-heading">
+                <p class="eyebrow">Related</p>
+                <h2>관련 글</h2>
+            </div>
+            <div class="post-grid compact-grid">
+                @for (int iIndex = 0; iIndex < listRelatedPosts.Count; iIndex++)
+                {
+                    BlogPost blogPost = listRelatedPosts[iIndex];
+                    <article class="post-card">
+                        <a href="@($"posts/{blogPost.Slug}")">
+                            <span class="post-category">@blogPost.BlogCategory?.Name</span>
+                            <h3>@blogPost.Title</h3>
+                            <p>@blogPost.Summary</p>
+                        </a>
+                    </article>
+                }
+            </div>
+        </section>
+    }
+}
+
+@code {
+    [Parameter]
+    public string? Slug { get; set; }
+
+    private BlogPost? blogPostSelected;
+    private RenderedArticle renderedArticle = new();
+    private List<string> listTagNames = [];
+    private List<BlogPost> listRelatedPosts = [];
+
+    protected override async Task OnParametersSetAsync()
+    {
+        await using ApplicationDbContext applicationDbContext = await DbContextFactory.CreateDbContextAsync();
+
+        blogPostSelected = await applicationDbContext.BlogPosts
+            .AsNoTracking()
+            .Include(blogPost => blogPost.Author)
+            .Include(blogPost => blogPost.BlogCategory)
+            .Include(blogPost => blogPost.BlogPostTags)
+                .ThenInclude(blogPostTag => blogPostTag.BlogTag)
+            .FirstOrDefaultAsync(blogPost => blogPost.Slug == Slug && blogPost.IsPublished);
+
+        if (blogPostSelected is null)
+        {
+            renderedArticle = new RenderedArticle();
+            listTagNames = [];
+            listRelatedPosts = [];
+            return;
+        }
+
+        renderedArticle = MarkdownRenderService.Render(blogPostSelected.ContentMarkdown);
+        listTagNames = blogPostSelected.BlogPostTags
+            .Where(blogPostTag => blogPostTag.BlogTag is not null)
+            .Select(blogPostTag => blogPostTag.BlogTag!.Name)
+            .OrderBy(sTagName => sTagName)
+            .ToList();
+
+        await IncreaseViewCountAsync(blogPostSelected.BlogPostId);
+        await LoadRelatedPostsAsync(blogPostSelected);
+    }
+
+    private async Task IncreaseViewCountAsync(int iBlogPostId)
+    {
+        await using ApplicationDbContext applicationDbContext = await DbContextFactory.CreateDbContextAsync();
+        BlogPost? blogPost = await applicationDbContext.BlogPosts.FirstOrDefaultAsync(blogPostItem => blogPostItem.BlogPostId == iBlogPostId);
+
+        if (blogPost is null)
+        {
+            return;
+        }
+
+        blogPost.ViewCount++;
+        await applicationDbContext.SaveChangesAsync();
+        blogPostSelected!.ViewCount = blogPost.ViewCount;
+    }
+
+    private async Task LoadRelatedPostsAsync(BlogPost blogPostCurrent)
+    {
+        await using ApplicationDbContext applicationDbContext = await DbContextFactory.CreateDbContextAsync();
+
+        listRelatedPosts = await applicationDbContext.BlogPosts
+            .AsNoTracking()
+            .Include(blogPost => blogPost.BlogCategory)
+            .Where(blogPost => blogPost.IsPublished
+                && blogPost.BlogPostId != blogPostCurrent.BlogPostId
+                && blogPost.BlogCategoryId == blogPostCurrent.BlogCategoryId)
+            .OrderByDescending(blogPost => blogPost.PublishedAtUtc)
+            .Take(3)
+            .ToListAsync();
+    }
+
+    private static string FormatDate(DateTime? dateTimePublishedAtUtc)
+    {
+        return dateTimePublishedAtUtc?.ToLocalTime().ToString("yyyy.MM.dd") ?? "Draft";
+    }
+}

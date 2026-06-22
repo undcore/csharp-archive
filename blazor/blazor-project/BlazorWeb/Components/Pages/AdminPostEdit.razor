@@ -1,0 +1,323 @@
+@page "/admin/posts/new"
+@page "/admin/posts/edit/{PostId:int}"
+@attribute [Authorize(Roles = BlogRoles.Admin)]
+
+@using System.ComponentModel.DataAnnotations
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.Identity
+
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject IDbContextFactory<ApplicationDbContext> DbContextFactory
+@inject NavigationManager NavigationManager
+@inject SlugService SlugService
+@inject UserManager<ApplicationUser> UserManager
+
+<PageTitle>@GetPageTitle()</PageTitle>
+
+<section class="archive-header">
+    <p class="eyebrow">Editor</p>
+    <h1>@GetPageTitle()</h1>
+    <p>마크다운 기반으로 코드 블록, H2/H3/H4 목차, 태그를 포함한 기술 문서를 작성합니다.</p>
+</section>
+
+<EditForm Model="inputModel" OnValidSubmit="SavePostAsync" FormName="post-editor" class="editor-layout">
+    <DataAnnotationsValidator />
+    <ValidationSummary class="text-danger" role="alert" />
+
+    @if (!string.IsNullOrWhiteSpace(sStatusMessage))
+    {
+        <div class="status-message">@sStatusMessage</div>
+    }
+
+    <div class="editor-main">
+        <label class="field-group">
+            <span>Title</span>
+            <InputText @bind-Value="inputModel.Title" class="form-control" />
+            <ValidationMessage For="() => inputModel.Title" class="text-danger" />
+        </label>
+
+        <label class="field-group">
+            <span>Summary</span>
+            <InputTextArea @bind-Value="inputModel.Summary" class="form-control summary-input" />
+            <ValidationMessage For="() => inputModel.Summary" class="text-danger" />
+        </label>
+
+        <label class="field-group">
+            <span>Markdown Content</span>
+            <InputTextArea @bind-Value="inputModel.ContentMarkdown" class="form-control markdown-editor" />
+            <ValidationMessage For="() => inputModel.ContentMarkdown" class="text-danger" />
+        </label>
+    </div>
+
+    <aside class="editor-side">
+        <label class="field-group">
+            <span>Category</span>
+            <InputSelect @bind-Value="inputModel.BlogCategoryId" class="form-control">
+                <option value="0">Select category</option>
+                @for (int iIndex = 0; iIndex < listCategories.Count; iIndex++)
+                {
+                    BlogCategory blogCategory = listCategories[iIndex];
+                    <option value="@blogCategory.BlogCategoryId">@GetCategoryLabel(blogCategory)</option>
+                }
+            </InputSelect>
+            <ValidationMessage For="() => inputModel.BlogCategoryId" class="text-danger" />
+        </label>
+
+        <label class="field-group">
+            <span>Slug</span>
+            <InputText @bind-Value="inputModel.Slug" class="form-control" />
+        </label>
+
+        <label class="field-group">
+            <span>Tags</span>
+            <InputText @bind-Value="inputModel.Tags" class="form-control" placeholder="Blazor, C#, CS" />
+        </label>
+
+        <label class="check-row">
+            <InputCheckbox @bind-Value="inputModel.IsPublished" />
+            <span>Publish this post</span>
+        </label>
+
+        <label class="check-row">
+            <InputCheckbox @bind-Value="inputModel.IsFeatured" />
+            <span>Feature on home</span>
+        </label>
+
+        <button type="submit" class="primary-action editor-submit">Save Post</button>
+        <a class="secondary-action editor-cancel" href="admin/posts">Back</a>
+    </aside>
+</EditForm>
+
+@code {
+    [Parameter]
+    public int PostId { get; set; }
+
+    private PostInputModel inputModel = new();
+    private List<BlogCategory> listCategories = [];
+    private string? sStatusMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadCategoriesAsync();
+
+        if (PostId > 0)
+        {
+            await LoadPostAsync();
+        }
+    }
+
+    private async Task LoadCategoriesAsync()
+    {
+        await using ApplicationDbContext applicationDbContext = await DbContextFactory.CreateDbContextAsync();
+
+        listCategories = await applicationDbContext.BlogCategories
+            .AsNoTracking()
+            .Include(blogCategory => blogCategory.ParentBlogCategory)
+            .OrderBy(blogCategory => blogCategory.ParentBlogCategory == null ? blogCategory.SortOrder : blogCategory.ParentBlogCategory.SortOrder)
+            .ThenBy(blogCategory => blogCategory.ParentBlogCategoryId == null ? "" : blogCategory.ParentBlogCategory!.Name)
+            .ThenBy(blogCategory => blogCategory.SortOrder)
+            .ThenBy(blogCategory => blogCategory.Name)
+            .ToListAsync();
+    }
+
+    private async Task LoadPostAsync()
+    {
+        await using ApplicationDbContext applicationDbContext = await DbContextFactory.CreateDbContextAsync();
+
+        BlogPost? blogPost = await applicationDbContext.BlogPosts
+            .AsNoTracking()
+            .Include(blogPostItem => blogPostItem.BlogPostTags)
+                .ThenInclude(blogPostTag => blogPostTag.BlogTag)
+            .FirstOrDefaultAsync(blogPostItem => blogPostItem.BlogPostId == PostId);
+
+        if (blogPost is null)
+        {
+            sStatusMessage = "게시글을 찾을 수 없습니다.";
+            return;
+        }
+
+        inputModel = new PostInputModel
+        {
+            Title = blogPost.Title,
+            Slug = blogPost.Slug,
+            Summary = blogPost.Summary,
+            ContentMarkdown = blogPost.ContentMarkdown,
+            BlogCategoryId = blogPost.BlogCategoryId,
+            IsPublished = blogPost.IsPublished,
+            IsFeatured = blogPost.IsFeatured,
+            Tags = string.Join(", ", blogPost.BlogPostTags
+                .Where(blogPostTag => blogPostTag.BlogTag is not null)
+                .Select(blogPostTag => blogPostTag.BlogTag!.Name)
+                .OrderBy(sTagName => sTagName))
+        };
+    }
+
+    private async Task SavePostAsync()
+    {
+        AuthenticationState authenticationState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        ApplicationUser? applicationUser = await UserManager.GetUserAsync(authenticationState.User);
+
+        if (applicationUser is null)
+        {
+            sStatusMessage = "로그인이 필요합니다.";
+            return;
+        }
+
+        await using ApplicationDbContext applicationDbContext = await DbContextFactory.CreateDbContextAsync();
+        BlogPost blogPost;
+
+        if (PostId > 0)
+        {
+            BlogPost? blogPostExisting = await applicationDbContext.BlogPosts
+                .Include(blogPostItem => blogPostItem.BlogPostTags)
+                .FirstOrDefaultAsync(blogPostItem => blogPostItem.BlogPostId == PostId);
+
+            if (blogPostExisting is null)
+            {
+                sStatusMessage = "수정할 게시글을 찾을 수 없습니다.";
+                return;
+            }
+
+            blogPost = blogPostExisting;
+        }
+        else
+        {
+            blogPost = new BlogPost
+            {
+                AuthorId = applicationUser.Id,
+                CreatedAtUtc = DateTime.UtcNow
+            };
+
+            applicationDbContext.BlogPosts.Add(blogPost);
+        }
+
+        await ApplyInputAsync(applicationDbContext, blogPost);
+        await SaveTagsAsync(applicationDbContext, blogPost);
+        await applicationDbContext.SaveChangesAsync();
+
+        NavigationManager.NavigateTo("admin/posts");
+    }
+
+    private async Task ApplyInputAsync(ApplicationDbContext applicationDbContext, BlogPost blogPost)
+    {
+        string sBaseSlug = string.IsNullOrWhiteSpace(inputModel.Slug)
+            ? SlugService.CreateSlug(inputModel.Title)
+            : SlugService.CreateSlug(inputModel.Slug);
+
+        blogPost.Title = inputModel.Title.Trim();
+        blogPost.Slug = await CreateUniqueSlugAsync(applicationDbContext, sBaseSlug, blogPost.BlogPostId);
+        blogPost.Summary = inputModel.Summary.Trim();
+        blogPost.ContentMarkdown = inputModel.ContentMarkdown.Trim();
+        blogPost.BlogCategoryId = inputModel.BlogCategoryId;
+        blogPost.IsFeatured = inputModel.IsFeatured;
+        blogPost.IsPublished = inputModel.IsPublished;
+        blogPost.UpdatedAtUtc = DateTime.UtcNow;
+
+        if (inputModel.IsPublished)
+        {
+            blogPost.PublishedAtUtc ??= DateTime.UtcNow;
+        }
+        else
+        {
+            blogPost.PublishedAtUtc = null;
+        }
+    }
+
+    private async Task SaveTagsAsync(ApplicationDbContext applicationDbContext, BlogPost blogPost)
+    {
+        string[] arrTagNames = inputModel.Tags
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        blogPost.BlogPostTags.Clear();
+
+        for (int iIndex = 0; iIndex < arrTagNames.Length; iIndex++)
+        {
+            string sTagName = arrTagNames[iIndex];
+            string sTagSlug = SlugService.CreateSlug(sTagName);
+            BlogTag? blogTag = await applicationDbContext.BlogTags.FirstOrDefaultAsync(blogTagItem => blogTagItem.Slug == sTagSlug);
+
+            if (blogTag is null)
+            {
+                blogTag = new BlogTag
+                {
+                    Name = sTagName,
+                    Slug = sTagSlug
+                };
+            }
+
+            blogPost.BlogPostTags.Add(new BlogPostTag
+            {
+                BlogPost = blogPost,
+                BlogTag = blogTag
+            });
+        }
+    }
+
+    private async Task<string> CreateUniqueSlugAsync(ApplicationDbContext applicationDbContext, string sBaseSlug, int iCurrentPostId)
+    {
+        bool bBaseSlugExists = await applicationDbContext.BlogPosts
+            .AnyAsync(blogPost => blogPost.Slug == sBaseSlug && blogPost.BlogPostId != iCurrentPostId);
+
+        if (!bBaseSlugExists)
+        {
+            return sBaseSlug;
+        }
+
+        for (int iIndex = 2; iIndex < 10000; iIndex++)
+        {
+            string sCandidateSlug = $"{sBaseSlug}-{iIndex}";
+            bool bCandidateExists = await applicationDbContext.BlogPosts
+                .AnyAsync(blogPost => blogPost.Slug == sCandidateSlug && blogPost.BlogPostId != iCurrentPostId);
+
+            if (!bCandidateExists)
+            {
+                return sCandidateSlug;
+            }
+        }
+
+        return $"{sBaseSlug}-{Guid.NewGuid():N}"[..180];
+    }
+
+    private string GetPageTitle()
+    {
+        return PostId > 0 ? "게시글 수정" : "새 게시글 작성";
+    }
+
+    private static string GetCategoryLabel(BlogCategory blogCategory)
+    {
+        if (blogCategory.ParentBlogCategory is null)
+        {
+            return blogCategory.Name;
+        }
+
+        return $"{blogCategory.ParentBlogCategory.Name} / {blogCategory.Name}";
+    }
+
+    private sealed class PostInputModel
+    {
+        [Required(ErrorMessage = "제목을 입력하세요.")]
+        [StringLength(180)]
+        public string Title { get; set; } = "";
+
+        [StringLength(220)]
+        public string Slug { get; set; } = "";
+
+        [Required(ErrorMessage = "요약을 입력하세요.")]
+        [StringLength(360)]
+        public string Summary { get; set; } = "";
+
+        [Required(ErrorMessage = "본문을 입력하세요.")]
+        public string ContentMarkdown { get; set; } = "";
+
+        [Range(1, int.MaxValue, ErrorMessage = "카테고리를 선택하세요.")]
+        public int BlogCategoryId { get; set; }
+
+        public string Tags { get; set; } = "";
+
+        public bool IsPublished { get; set; } = true;
+
+        public bool IsFeatured { get; set; }
+    }
+}

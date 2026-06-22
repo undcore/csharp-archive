@@ -1,0 +1,84 @@
+@page "/search"
+
+@inject IDbContextFactory<ApplicationDbContext> DbContextFactory
+
+<PageTitle>Search</PageTitle>
+
+<section class="archive-header">
+    <p class="eyebrow">Search</p>
+    <h1>검색</h1>
+    <p>@GetSearchDescription()</p>
+</section>
+
+<section class="post-list">
+    @if (string.IsNullOrWhiteSpace(Query))
+    {
+        <div class="empty-state">검색어를 입력하세요.</div>
+    }
+    else if (listSearchResults.Count == 0)
+    {
+        <div class="empty-state">검색 결과가 없습니다.</div>
+    }
+    else
+    {
+        @for (int iIndex = 0; iIndex < listSearchResults.Count; iIndex++)
+        {
+            BlogPost blogPost = listSearchResults[iIndex];
+            <article class="post-list-item">
+                <a href="@($"posts/{blogPost.Slug}")">
+                    <span class="post-category">@blogPost.BlogCategory?.Name</span>
+                    <h2>@blogPost.Title</h2>
+                    <p>@blogPost.Summary</p>
+                    <time datetime="@blogPost.PublishedAtUtc?.ToString("O")">@FormatDate(blogPost.PublishedAtUtc)</time>
+                </a>
+            </article>
+        }
+    }
+</section>
+
+@code {
+    [SupplyParameterFromQuery(Name = "query")]
+    public string? Query { get; set; }
+
+    private List<BlogPost> listSearchResults = [];
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (string.IsNullOrWhiteSpace(Query))
+        {
+            listSearchResults = [];
+            return;
+        }
+
+        string sSearchText = Query.Trim();
+        string sSearchPattern = $"%{sSearchText}%";
+
+        await using ApplicationDbContext applicationDbContext = await DbContextFactory.CreateDbContextAsync();
+
+        listSearchResults = await applicationDbContext.BlogPosts
+            .AsNoTracking()
+            .Include(blogPost => blogPost.BlogCategory)
+            .Where(blogPost => blogPost.IsPublished
+                && (EF.Functions.Like(blogPost.Title, sSearchPattern)
+                    || EF.Functions.Like(blogPost.Summary, sSearchPattern)
+                    || EF.Functions.Like(blogPost.ContentMarkdown, sSearchPattern)))
+            .OrderByDescending(blogPost => blogPost.PublishedAtUtc)
+            .Take(30)
+            .ToListAsync();
+    }
+
+    private string GetSearchDescription()
+    {
+        if (string.IsNullOrWhiteSpace(Query))
+        {
+            return "제목, 요약, 본문 내용을 기준으로 검색합니다.";
+        }
+
+        return $"'{Query.Trim()}' 검색 결과 {listSearchResults.Count}개";
+    }
+
+    private static string FormatDate(DateTime? dateTimePublishedAtUtc)
+    {
+        return dateTimePublishedAtUtc?.ToLocalTime().ToString("yyyy.MM.dd") ?? "Draft";
+    }
+}

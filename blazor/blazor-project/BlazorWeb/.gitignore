@@ -1,0 +1,17 @@
+bin/
+obj/
+.vs/
+.vscode/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+appsettings.Development.json
+*.db
+*.db-shm
+*.db-wal
+
+TestResults/
+coverage/
+*.nupkg

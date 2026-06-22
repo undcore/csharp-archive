@@ -1,0 +1,120 @@
+@page "/admin/posts"
+@attribute [Authorize(Roles = BlogRoles.Admin)]
+
+@inject IDbContextFactory<ApplicationDbContext> DbContextFactory
+
+<PageTitle>Post Admin</PageTitle>
+
+<section class="archive-header admin-header">
+    <div>
+        <p class="eyebrow">Admin</p>
+        <h1>게시글 관리</h1>
+        <p>관리자 권한으로 카테고리별 학습 기록을 작성하고 공개 상태를 관리합니다.</p>
+    </div>
+    <div class="admin-action-row">
+        <a class="secondary-action" href="admin/categories">Categories</a>
+        <a class="primary-action" href="admin/posts/new">New Post</a>
+    </div>
+</section>
+
+<section class="admin-table-shell">
+    @if (listBlogPosts.Count == 0)
+    {
+        <div class="empty-state">작성된 글이 없습니다.</div>
+    }
+    else
+    {
+        <table class="admin-table">
+            <thead>
+                <tr>
+                    <th>Title</th>
+                    <th>Category</th>
+                    <th>Status</th>
+                    <th>Updated</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                @for (int iIndex = 0; iIndex < listBlogPosts.Count; iIndex++)
+                {
+                    BlogPost blogPost = listBlogPosts[iIndex];
+                    <tr>
+                        <td>
+                            <strong>@blogPost.Title</strong>
+                            <span>@blogPost.Summary</span>
+                        </td>
+                        <td>@blogPost.BlogCategory?.Name</td>
+                        <td>
+                            <span class="@GetStatusClass(blogPost)">@GetStatusText(blogPost)</span>
+                        </td>
+                        <td>@blogPost.UpdatedAtUtc.ToLocalTime().ToString("yyyy.MM.dd HH:mm")</td>
+                        <td class="table-actions">
+                            <button type="button" class="table-button" @onclick="() => TogglePublishAsync(blogPost.BlogPostId)">@GetToggleText(blogPost)</button>
+                            <a href="@($"admin/posts/edit/{blogPost.BlogPostId}")">Edit</a>
+                            @if (blogPost.IsPublished)
+                            {
+                                <a href="@($"posts/{blogPost.Slug}")">View</a>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+</section>
+
+@code {
+    private List<BlogPost> listBlogPosts = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        await using ApplicationDbContext applicationDbContext = await DbContextFactory.CreateDbContextAsync();
+
+        listBlogPosts = await applicationDbContext.BlogPosts
+            .AsNoTracking()
+            .Include(blogPost => blogPost.BlogCategory)
+            .OrderByDescending(blogPost => blogPost.UpdatedAtUtc)
+            .ToListAsync();
+    }
+
+    private static string GetStatusText(BlogPost blogPost)
+    {
+        return blogPost.IsPublished ? "Published" : "Draft";
+    }
+
+    private static string GetStatusClass(BlogPost blogPost)
+    {
+        return blogPost.IsPublished ? "status-pill published" : "status-pill draft";
+    }
+
+    private static string GetToggleText(BlogPost blogPost)
+    {
+        return blogPost.IsPublished ? "Unpublish" : "Publish";
+    }
+
+    private async Task TogglePublishAsync(int iBlogPostId)
+    {
+        await using ApplicationDbContext applicationDbContext = await DbContextFactory.CreateDbContextAsync();
+        BlogPost? blogPost = await applicationDbContext.BlogPosts.FirstOrDefaultAsync(blogPostItem => blogPostItem.BlogPostId == iBlogPostId);
+
+        if (blogPost is null)
+        {
+            return;
+        }
+
+        blogPost.IsPublished = !blogPost.IsPublished;
+        blogPost.UpdatedAtUtc = DateTime.UtcNow;
+
+        if (blogPost.IsPublished)
+        {
+            blogPost.PublishedAtUtc ??= DateTime.UtcNow;
+        }
+        else
+        {
+            blogPost.PublishedAtUtc = null;
+        }
+
+        await applicationDbContext.SaveChangesAsync();
+        await OnInitializedAsync();
+    }
+}

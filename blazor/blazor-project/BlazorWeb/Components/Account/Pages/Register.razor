@@ -1,0 +1,176 @@
+﻿@page "/Account/Register"
+
+@using System.ComponentModel.DataAnnotations
+@using System.Text
+@using System.Text.Encodings.Web
+@using Microsoft.AspNetCore.Identity
+@using Microsoft.AspNetCore.WebUtilities
+@using BlazorWeb.Data
+
+@inject UserManager<ApplicationUser> UserManager
+@inject IUserStore<ApplicationUser> UserStore
+@inject SignInManager<ApplicationUser> SignInManager
+@inject IEmailSender<ApplicationUser> EmailSender
+@inject ILogger<Register> Logger
+@inject NavigationManager NavigationManager
+@inject IdentityRedirectManager RedirectManager
+
+<PageTitle>Register</PageTitle>
+
+<h1>회원가입</h1>
+
+<div class="row">
+    <div class="col-md-4">
+        <StatusMessage Message="@Message" />
+        <EditForm Model="Input" asp-route-returnUrl="@ReturnUrl" method="post" OnValidSubmit="RegisterUser" FormName="register">
+            <DataAnnotationsValidator />
+            <h2>Dev Archive 계정 만들기</h2>
+            <hr />
+            <ValidationSummary class="text-danger" role="alert" />
+            <div class="form-floating mb-3">
+                <InputText @bind-Value="Input.UserName" class="form-control" autocomplete="username" aria-required="true" placeholder="userid" />
+                <label for="username">아이디</label>
+                <ValidationMessage For="() => Input.UserName" class="text-danger" />
+            </div>
+            <div class="form-floating mb-3">
+                <InputText @bind-Value="Input.Nickname" class="form-control" autocomplete="nickname" aria-required="true" placeholder="nickname" />
+                <label for="nickname">닉네임</label>
+                <ValidationMessage For="() => Input.Nickname" class="text-danger" />
+            </div>
+            <div class="form-floating mb-3">
+                <InputText @bind-Value="Input.Email" class="form-control" autocomplete="username" aria-required="true" placeholder="name@example.com" />
+                <label for="email">이메일</label>
+                <ValidationMessage For="() => Input.Email" class="text-danger" />
+            </div>
+            <div class="form-floating mb-3">
+                <InputText type="password" @bind-Value="Input.Password" class="form-control" autocomplete="new-password" aria-required="true" placeholder="password" />
+                <label for="password">비밀번호</label>
+                <ValidationMessage For="() => Input.Password" class="text-danger" />
+            </div>
+            <div class="form-floating mb-3">
+                <InputText type="password" @bind-Value="Input.ConfirmPassword" class="form-control" autocomplete="new-password" aria-required="true" placeholder="password" />
+                <label for="confirm-password">비밀번호 확인</label>
+                <ValidationMessage For="() => Input.ConfirmPassword" class="text-danger" />
+            </div>
+            <button type="submit" class="w-100 btn btn-lg btn-primary">회원가입</button>
+        </EditForm>
+    </div>
+    <div class="col-md-6 col-md-offset-2">
+        <section>
+            <h3>외부 로그인</h3>
+            <hr />
+            <ExternalLoginPicker />
+        </section>
+    </div>
+</div>
+
+@code {
+    private IEnumerable<IdentityError>? enumerableIdentityErrors;
+
+    [SupplyParameterFromForm]
+    private InputModel Input { get; set; } = new();
+
+    [SupplyParameterFromQuery]
+    private string? ReturnUrl { get; set; }
+
+    private string? Message => enumerableIdentityErrors is null ? null : $"Error: {string.Join(", ", enumerableIdentityErrors.Select(identityError => identityError.Description))}";
+
+    public async Task RegisterUser(EditContext editContext)
+    {
+        ApplicationUser applicationUser = CreateUser();
+        applicationUser.Nickname = Input.Nickname.Trim();
+        applicationUser.CreatedAtUtc = DateTime.UtcNow;
+
+        await UserStore.SetUserNameAsync(applicationUser, Input.UserName.Trim(), CancellationToken.None);
+        IUserEmailStore<ApplicationUser> userEmailStore = GetEmailStore();
+        await userEmailStore.SetEmailAsync(applicationUser, Input.Email.Trim(), CancellationToken.None);
+        IdentityResult identityResult = await UserManager.CreateAsync(applicationUser, Input.Password);
+
+        if (!identityResult.Succeeded)
+        {
+            enumerableIdentityErrors = identityResult.Errors;
+            return;
+        }
+
+        IdentityResult identityRoleResult = await UserManager.AddToRoleAsync(applicationUser, BlogRoles.User);
+
+        if (!identityRoleResult.Succeeded)
+        {
+            enumerableIdentityErrors = identityRoleResult.Errors;
+            return;
+        }
+
+        Logger.LogInformation("User created a new account with password.");
+
+        string sUserId = await UserManager.GetUserIdAsync(applicationUser);
+        string sCode = await UserManager.GenerateEmailConfirmationTokenAsync(applicationUser);
+        sCode = WebEncoders.Base64UrlEncode(Encoding.UTF8.GetBytes(sCode));
+        string sCallbackUrl = NavigationManager.GetUriWithQueryParameters(
+            NavigationManager.ToAbsoluteUri("Account/ConfirmEmail").AbsoluteUri,
+            new Dictionary<string, object?> { ["userId"] = sUserId, ["code"] = sCode, ["returnUrl"] = ReturnUrl });
+
+        await EmailSender.SendConfirmationLinkAsync(applicationUser, Input.Email.Trim(), HtmlEncoder.Default.Encode(sCallbackUrl));
+
+        if (UserManager.Options.SignIn.RequireConfirmedAccount)
+        {
+            RedirectManager.RedirectTo(
+                "Account/RegisterConfirmation",
+                new() { ["email"] = Input.Email, ["returnUrl"] = ReturnUrl });
+        }
+
+        await SignInManager.SignInAsync(applicationUser, isPersistent: false);
+        RedirectManager.RedirectTo(ReturnUrl);
+    }
+
+    private ApplicationUser CreateUser()
+    {
+        try
+        {
+            return Activator.CreateInstance<ApplicationUser>();
+        }
+        catch
+        {
+            throw new InvalidOperationException($"Can't create an instance of '{nameof(ApplicationUser)}'. " +
+                $"Ensure that '{nameof(ApplicationUser)}' is not an abstract class and has a parameterless constructor.");
+        }
+    }
+
+    private IUserEmailStore<ApplicationUser> GetEmailStore()
+    {
+        if (!UserManager.SupportsUserEmail)
+        {
+            throw new NotSupportedException("The default UI requires a user store with email support.");
+        }
+        return (IUserEmailStore<ApplicationUser>)UserStore;
+    }
+
+    private sealed class InputModel
+    {
+        [Required]
+        [StringLength(40, MinimumLength = 4)]
+        [RegularExpression("^[a-zA-Z0-9_]+$", ErrorMessage = "아이디는 영문, 숫자, 밑줄만 사용할 수 있습니다.")]
+        [Display(Name = "User ID")]
+        public string UserName { get; set; } = "";
+
+        [Required]
+        [StringLength(80, MinimumLength = 2)]
+        [Display(Name = "Nickname")]
+        public string Nickname { get; set; } = "";
+
+        [Required]
+        [EmailAddress]
+        [Display(Name = "Email")]
+        public string Email { get; set; } = "";
+
+        [Required]
+        [StringLength(100, ErrorMessage = "The {0} must be at least {2} and at max {1} characters long.", MinimumLength = 6)]
+        [DataType(DataType.Password)]
+        [Display(Name = "Password")]
+        public string Password { get; set; } = "";
+
+        [DataType(DataType.Password)]
+        [Display(Name = "Confirm password")]
+        [Compare("Password", ErrorMessage = "The password and confirmation password do not match.")]
+        public string ConfirmPassword { get; set; } = "";
+    }
+}

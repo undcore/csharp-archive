@@ -1,0 +1,101 @@
+@implements IDisposable
+
+@inject IDbContextFactory<ApplicationDbContext> DbContextFactory
+@inject NavigationManager NavigationManager
+
+<header class="site-header">
+    <div class="site-header-inner">
+        <a class="brand-link" href="">
+            <span class="brand-mark">DEV</span>
+            <span class="brand-text">Study Archive</span>
+        </a>
+
+        <input id="site-menu-toggle" type="checkbox" class="site-menu-toggle" title="Navigation menu" />
+        <label class="site-menu-button" for="site-menu-toggle" aria-label="Navigation menu">
+            <span></span>
+            <span></span>
+            <span></span>
+        </label>
+
+        <div class="site-nav-panel">
+            <nav class="category-nav" aria-label="Category navigation">
+                @if (listRootCategories.Count == 0)
+                {
+                    <NavLink href="" class="category-link" Match="NavLinkMatch.All">Home</NavLink>
+                }
+                else
+                {
+                    @for (int iIndex = 0; iIndex < listRootCategories.Count; iIndex++)
+                    {
+                        BlogCategory blogCategory = listRootCategories[iIndex];
+                        <NavLink class="category-link" href="@($"category/{blogCategory.Slug}")">@blogCategory.Name</NavLink>
+                    }
+                }
+            </nav>
+
+            <form class="site-search" method="get" action="/search">
+                <input type="search" name="query" placeholder="Search notes" aria-label="Search notes" />
+                <button type="submit">Search</button>
+            </form>
+
+            <div class="account-nav">
+                <button type="button" class="theme-toggle" data-theme-toggle>Dark</button>
+                <AuthorizeView Roles="@BlogRoles.Admin">
+                    <Authorized>
+                        <NavLink class="account-link write-link" href="admin/posts">Write</NavLink>
+                        <NavLink class="account-link" href="admin/categories">Categories</NavLink>
+                    </Authorized>
+                </AuthorizeView>
+                <AuthorizeView>
+                    <Authorized>
+                        <NavLink class="account-link" href="Account/Manage">@context.User.Identity?.Name</NavLink>
+                        <form action="Account/Logout" method="post">
+                            <AntiforgeryToken />
+                            <input type="hidden" name="ReturnUrl" value="@sCurrentUrl" />
+                            <button type="submit" class="account-link account-button">Logout</button>
+                        </form>
+                    </Authorized>
+                    <NotAuthorized>
+                        <NavLink class="account-link" href="Account/Login">Login</NavLink>
+                        <NavLink class="account-link" href="Account/Register">Join</NavLink>
+                    </NotAuthorized>
+                </AuthorizeView>
+            </div>
+        </div>
+    </div>
+</header>
+
+@code {
+    private string? sCurrentUrl;
+    private List<BlogCategory> listRootCategories = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        sCurrentUrl = NavigationManager.ToBaseRelativePath(NavigationManager.Uri);
+        NavigationManager.LocationChanged += OnLocationChanged;
+        await LoadCategoriesAsync();
+    }
+
+    private async Task LoadCategoriesAsync()
+    {
+        await using ApplicationDbContext applicationDbContext = await DbContextFactory.CreateDbContextAsync();
+
+        listRootCategories = await applicationDbContext.BlogCategories
+            .AsNoTracking()
+            .Where(blogCategory => blogCategory.ParentBlogCategoryId == null)
+            .OrderBy(blogCategory => blogCategory.SortOrder)
+            .ThenBy(blogCategory => blogCategory.Name)
+            .ToListAsync();
+    }
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs locationChangedEventArgs)
+    {
+        sCurrentUrl = NavigationManager.ToBaseRelativePath(locationChangedEventArgs.Location);
+        StateHasChanged();
+    }
+
+    public void Dispose()
+    {
+        NavigationManager.LocationChanged -= OnLocationChanged;
+    }
+}

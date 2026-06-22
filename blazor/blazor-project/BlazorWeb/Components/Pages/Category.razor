@@ -1,0 +1,94 @@
+@page "/category/{Slug}"
+
+@inject IDbContextFactory<ApplicationDbContext> DbContextFactory
+
+<PageTitle>@(blogCategorySelected?.Name ?? "Category")</PageTitle>
+
+@if (blogCategorySelected is null)
+{
+    <section class="empty-state">
+        카테고리를 찾을 수 없습니다.
+    </section>
+}
+else
+{
+    <section class="archive-header">
+        <p class="eyebrow">Category</p>
+        <h1>@blogCategorySelected.Name</h1>
+        <p>@blogCategorySelected.Description</p>
+
+        @if (blogCategorySelected.ChildCategories.Count > 0)
+        {
+            <div class="tag-row">
+                @for (int iIndex = 0; iIndex < blogCategorySelected.ChildCategories.Count; iIndex++)
+                {
+                    BlogCategory blogCategoryChild = blogCategorySelected.ChildCategories.ElementAt(iIndex);
+                    <a href="@($"category/{blogCategoryChild.Slug}")">@blogCategoryChild.Name</a>
+                }
+            </div>
+        }
+    </section>
+
+    <section class="post-list">
+        @if (listBlogPosts.Count == 0)
+        {
+            <div class="empty-state">이 카테고리에 게시된 글이 없습니다.</div>
+        }
+        else
+        {
+            @for (int iIndex = 0; iIndex < listBlogPosts.Count; iIndex++)
+            {
+                BlogPost blogPost = listBlogPosts[iIndex];
+                <article class="post-list-item">
+                    <a href="@($"posts/{blogPost.Slug}")">
+                        <span class="post-category">@blogPost.BlogCategory?.Name</span>
+                        <h2>@blogPost.Title</h2>
+                        <p>@blogPost.Summary</p>
+                        <time datetime="@blogPost.PublishedAtUtc?.ToString("O")">@FormatDate(blogPost.PublishedAtUtc)</time>
+                    </a>
+                </article>
+            }
+        }
+    </section>
+}
+
+@code {
+    [Parameter]
+    public string? Slug { get; set; }
+
+    private BlogCategory? blogCategorySelected;
+    private List<BlogPost> listBlogPosts = [];
+
+    protected override async Task OnParametersSetAsync()
+    {
+        await using ApplicationDbContext applicationDbContext = await DbContextFactory.CreateDbContextAsync();
+
+        blogCategorySelected = await applicationDbContext.BlogCategories
+            .AsNoTracking()
+            .Include(blogCategory => blogCategory.ChildCategories.OrderBy(blogCategoryChild => blogCategoryChild.SortOrder))
+            .FirstOrDefaultAsync(blogCategory => blogCategory.Slug == Slug);
+
+        if (blogCategorySelected is null)
+        {
+            listBlogPosts = [];
+            return;
+        }
+
+        int[] arrCategoryIds = blogCategorySelected.ChildCategories
+            .Select(blogCategory => blogCategory.BlogCategoryId)
+            .Prepend(blogCategorySelected.BlogCategoryId)
+            .ToArray();
+
+        listBlogPosts = await applicationDbContext.BlogPosts
+            .AsNoTracking()
+            .Include(blogPost => blogPost.BlogCategory)
+            .Where(blogPost => blogPost.IsPublished && arrCategoryIds.Contains(blogPost.BlogCategoryId))
+            .OrderByDescending(blogPost => blogPost.PublishedAtUtc)
+            .ToListAsync();
+    }
+
+    private static string FormatDate(DateTime? dateTimePublishedAtUtc)
+    {
+        return dateTimePublishedAtUtc?.ToLocalTime().ToString("yyyy.MM.dd") ?? "Draft";
+    }
+}
